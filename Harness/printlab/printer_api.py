@@ -6,6 +6,11 @@ device card to the one that belongs to the chosen printer. Each printer keeps it
 ``Library/Devices/printer-<id>/``: the card in use is stored there byte for byte before the swap, and switching back
 puts the stored card back byte for byte. A printer with no stored card gets a blank one that holds only the name and
 model Bambuddy reported, with the facts to confirm left empty; nothing about feeding or nozzles is ever made up.
+
+After the swap the card is refreshed from what Bambuddy reports (``onboarding.adopt_device`` plus an
+``observed_hardware`` section with the nozzles and AMS units it sees). Those sections only ever hold observations. The
+``user_confirmed`` section, where the person's own statements live, is never written by a switch. If Bambuddy cannot be
+read at that moment the switch still succeeds and says the card was not refreshed.
 Credentials, projects and print tasks are not touched, and nothing is ever sent.
 
 If any step fails, every file is put back as it was, so a failed switch leaves no half-changed state.
@@ -136,6 +141,53 @@ def _swap_cards(current_id, target, target_id):
     return 'blank', created_store
 
 
+AMS_KINDS = {1: 'AMS', 2: 'AMS Lite', 3: 'AMS 2 Pro', 4: 'AMS HT'}
+
+
+def _hardware_observation(printer_id, client_factory=None):
+    """What Bambuddy reports about nozzles and AMS units for one printer. Observations only."""
+    client = (client_factory or bambuddy.Client)()
+    try:
+        live = client.get(f'printers/{printer_id}/status')
+    finally:
+        client.close()
+    if not isinstance(live, dict) or live.get('connected') is not True:
+        raise core.WorkflowError('The selected printer is not connected, so its hardware cannot be read')
+    nozzles = [{'diameter_mm': n.get('nozzle_diameter') or None, 'type': n.get('nozzle_type') or None}
+               for n in live.get('nozzles') or [] if isinstance(n, dict)]
+    units = []
+    for unit in live.get('ams') or []:
+        if not isinstance(unit, dict):
+            continue
+        kind = unit.get('ams_type')
+        units.append({'id': unit.get('id'), 'kind': AMS_KINDS.get(kind, f'type {kind}') if kind is not None else None,
+                      'module': unit.get('module_type'), 'is_ht': unit.get('is_ams_ht') is True,
+                      'extruder': (live.get('ams_extruder_map') or {}).get(str(unit.get('id')))})
+    return {'nozzles': nozzles, 'ams_units': units, 'at': core.now(),
+            'source': 'Bambuddy printer status (read-only); not a statement by the user'}
+
+
+def _refresh_card_from_bambuddy(client_factory=None):
+    """Write observations into the live card. Never touches ``user_confirmed``. Returns True when it ran."""
+    path = core.safe_path(core.ROOT, workspace.DOCUMENTS['device'], require_file=False)
+    onboarding.adopt_device(core.digest(path) if path.is_file() else None, client_factory)
+    printer_id = core.config().get('printer_id')
+    observation = _hardware_observation(printer_id, client_factory)
+    with core.lock('shared-context'):
+        card = core.read_json(path, {})
+        card['observed_hardware'] = observation
+        core.write_json(path, card)
+    return True
+
+
+def _try_refresh():
+    """Refresh the card from Bambuddy. A failure here must not undo or block the switch."""
+    try:
+        return _refresh_card_from_bambuddy()
+    except Exception:  # Bambuddy offline, printer not connected, unexpected reply: the switch itself is already valid
+        return False
+
+
 @router.post('/printer/select')
 def select(body: Select, request: Request):
     _session(request, write=True)
@@ -159,6 +211,7 @@ def select(body: Select, request: Request):
             with core.lock('shared-context'):
                 outcome, created_store = _swap_cards(current['printer_id'], target, body.printer_id)
             workspace.configure_connection(current['bambuddy_url'], body.printer_id, current['sha256'])
+            refreshed = _try_refresh()
         except HTTPException:
             raise
         except Exception as exc:  # any failure, including disk errors: put every file back
@@ -168,9 +221,13 @@ def select(body: Select, request: Request):
             raise HTTPException(500, '切换失败，已全部还原，设备没有变化') from None
     name, model = target.get('name'), target.get('model')
     if outcome == 'restored':
-        message = f'已切换到 {name}，并还原了它之前保存的设备卡。已有的切片与批准需要重新生成。'
+        message = f'已切换到 {name}，并还原了它之前保存的设备卡。'
     else:
-        message = (f'已切换到 {name}（{model}）。它还没有设备卡，已建一张空白的，只记录了名称和机型；'
-                   f'供料、喷嘴等信息没有填写，需要你核对后补上。原来那台的设备卡已原样保存，切回去会还原。'
-                   f'已有的切片与批准需要重新生成。')
-    return {'changed': True, 'printer_id': body.printer_id, 'printer': target, 'card': outcome, 'message': message}
+        message = (f'已切换到 {name}（{model}）。它还没有设备卡，已建一张新的；你确认过的内容（供料、备用喷嘴等）还是空的，需要你核对后补上。'
+                   f'原来那台的设备卡已原样保存，切回去会还原。')
+    if refreshed:
+        message += ' 已从 Bambuddy 同步了它当前报告的机型、固件、喷嘴和 AMS，这些只是观测值，不会改动你确认过的内容。'
+    else:
+        message += ' 这次没能从 Bambuddy 读取它的实时信息，设备卡没有刷新；设备连上后再切换一次即可同步。'
+    message += ' 已有的切片与批准需要重新生成。'
+    return {'changed': True, 'printer_id': body.printer_id, 'printer': target, 'card': outcome, 'synced': refreshed, 'message': message}
