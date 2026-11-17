@@ -93,8 +93,10 @@ def main():
                     page.get_by_role('heading', name=title, exact=True).wait_for()
                     checked.append(route)
                 page.goto(base + '/#/onboarding')
-                page.get_by_role('heading', name='Sarah · 3D 打印顾问', exact=True).wait_for()
-                page.get_by_role('heading', name='Mike · 工作流设计师', exact=True).wait_for()
+                page.get_by_role('heading', name='我的设备与材料', exact=True).wait_for()
+                # The Sarah and Mike cards were removed on purpose: they described external agent chats, and this workspace uses its own assistant.
+                assert page.get_by_role('heading', name='Sarah · 3D 打印顾问', exact=True).count() == 0
+                assert page.get_by_role('heading', name='Mike · 工作流设计师', exact=True).count() == 0
                 # The "let the agent continue setup" button was removed on purpose (this workspace has its own agent).
                 assert page.get_by_role('button', name='让 Agent 接着配置').count() == 0
                 page.get_by_role('button', name='Context/profile.md', exact=True).click()

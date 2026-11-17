@@ -2,13 +2,6 @@ import React, {useEffect, useState} from 'react';
 import {ArrowRight} from 'lucide-react';
 import './onboarding.css';
 
-const roleStates = {
-  pending: '待建立',
-  creating: '创建结果待核对',
-  created: '已建立，等待首次介绍',
-  introduced: '已介绍并读取共同资料',
-};
-
 export default function Onboarding({onNavigate, onDocument}) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -33,6 +26,9 @@ export default function Onboarding({onNavigate, onDocument}) {
     };
   }, []);
 
+  // The Sarah and Mike steps describe external agent chats. This workspace uses its own assistant, so those steps are not shown.
+  const nextActions = (data?.next_actions || []).filter(action => action.kind !== 'role');
+
   function openDocument(row) {
     onDocument({title: row.name, path: row.path, url: '/api/documents/' + row.path});
   }
@@ -46,7 +42,7 @@ export default function Onboarding({onNavigate, onDocument}) {
     {data && <>
       <section className="onboarding-panel">
         <h2>接下来</h2>
-        {data.next_actions.length > 0 ? <ul>{data.next_actions.map((action, index) =>
+        {nextActions.length > 0 ? <ul>{nextActions.map((action, index) =>
           <li key={`${action.kind}-${index}`}>{action.text}</li>
         )}</ul> : <p>基础配置已记录，可以继续自己的作品。</p>}
         {data.questions.length > 0 && <details>
@@ -54,15 +50,6 @@ export default function Onboarding({onNavigate, onDocument}) {
           <ul>{data.questions.map(question => <li key={question.id}>{question.text}</li>)}</ul>
         </details>}
       </section>
-      <div className="onboarding-roles">
-        {data.roles.map(role => <section className="onboarding-panel" key={role.role}>
-          <h2>{role.title}</h2>
-          <p className="muted">{roleStates[role.status] || role.status}</p>
-          {role.first_reply && <details><summary>首次介绍</summary><p className="role-reply">{role.first_reply}</p></details>}
-          {role.thread_id && <dl><dt>聊天标识</dt><dd>{role.thread_id}</dd><dt>运行位置</dt><dd>{role.host_id}</dd></dl>}
-          {role.status === 'creating' && <p>先由配置会话核对宿主中的创建结果，再继续登记。</p>}
-        </section>)}
-      </div>
       <section className="onboarding-panel">
         <h2>我的设备与材料</h2>
         <p>{data.device_card?.model || '机型待确认'} · {data.device?.message || '实时连接待检查'}</p>
