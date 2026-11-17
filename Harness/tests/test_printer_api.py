@@ -18,7 +18,8 @@ def client(tmp_path, monkeypatch):
     core.write_json(tmp_path / 'Runtime/config.json', {'bambuddy_url': 'http://127.0.0.1:8000', 'printer_id': 1})
     card = tmp_path / 'Library/Devices/X2D/device.json'
     card.parent.mkdir(parents=True)
-    core.write_json(card, {'schema_version': 1, 'name': '3DP-H2C', 'model': 'H2C', 'user_confirmed': {'model': 'H2C'}})
+    core.write_json(card, {'schema_version': 1, 'name': '3DP-H2C', 'model': 'H2C', 'user_confirmed': {'model': 'H2C', 'ams_count': 3}})
+    (card.parent / 'installed.md').write_text('# 本机设备\n\n- 供料：三个 AMS\n', encoding='utf-8')
     monkeypatch.setattr(onboarding, 'discover', lambda *a, **k: json.loads(json.dumps(PRINTERS)))
     prepared_api._sessions.clear()
     return TestClient(app, base_url='http://127.0.0.1:8018')
@@ -35,6 +36,11 @@ def config_text(tmp):
 
 def card_text(tmp):
     return (tmp / 'Library/Devices/X2D/device.json').read_text(encoding='utf-8')
+
+
+def notes_text(tmp):
+    path = tmp / 'Library/Devices/X2D/installed.md'
+    return path.read_text(encoding='utf-8') if path.is_file() else None
 
 
 def add_job(tmp, state):
@@ -85,25 +91,90 @@ def test_select_rejects_malformed_bodies_without_changing_anything(client, tmp_p
     assert config_text(tmp_path) == before
 
 
-def test_select_switches_only_the_printer_id(client, tmp_path):
+def test_select_switches_the_printer_id_and_nothing_else_in_the_config(client, tmp_path):
     before = json.loads(config_text(tmp_path))
-    card = card_text(tmp_path)
     result = client.post('/api/printer/select', json={'printer_id': 2}, headers=write_headers(client))
     assert result.status_code == 200
     data = result.json()
-    assert data['changed'] is True and data['printer_id'] == 2 and data['device_card_mismatch'] is True
-    assert 'H2C' in data['message'] and 'X1C' in data['message'] and '重新生成' in data['message']
-    after = json.loads(config_text(tmp_path))
-    assert after == {**before, 'printer_id': 2}  # nothing else in the config moved
-    assert card_text(tmp_path) == card  # the device card is left exactly as the user wrote it
+    assert data['changed'] is True and data['printer_id'] == 2 and data['card'] == 'blank'
+    assert json.loads(config_text(tmp_path)) == {**before, 'printer_id': 2}
 
 
-def test_select_back_restores_the_original_config_byte_for_byte(client, tmp_path):
-    original = config_text(tmp_path)
+def test_the_current_card_is_archived_untouched_and_a_blank_one_describes_only_what_bambuddy_reported(client, tmp_path):
+    original_card, original_notes = card_text(tmp_path), notes_text(tmp_path)
+    client.post('/api/printer/select', json={'printer_id': 2}, headers=write_headers(client))
+    # the H2C card is kept byte for byte under its own printer id
+    assert (tmp_path / 'Library/Devices/printer-1/device.json').read_text(encoding='utf-8') == original_card
+    assert (tmp_path / 'Library/Devices/printer-1/installed.md').read_text(encoding='utf-8') == original_notes
+    # the live card is now a blank one for the X1C: name and model only, nothing invented
+    live = json.loads(card_text(tmp_path))
+    assert live['name'] == '3DP-X1C' and live['model'] == 'X1C' and live['verification_status'] == 'unconfigured'
+    assert live.get('user_confirmed', {}) == {} and live.get('installed', {}) == {}
+    assert 'AMS' not in card_text(tmp_path) and notes_text(tmp_path) is None  # no notes file is invented either
+    assert '待核对' in card_text(tmp_path) or live.get('unverified')
+
+
+def test_switching_there_and_back_restores_both_files_byte_for_byte(client, tmp_path):
+    original = (config_text(tmp_path), card_text(tmp_path), notes_text(tmp_path))
     h = write_headers(client)
-    assert client.post('/api/printer/select', json={'printer_id': 2}, headers=h).json()['changed'] is True
-    assert client.post('/api/printer/select', json={'printer_id': 1}, headers=h).json()['device_card_mismatch'] is False
-    assert json.loads(config_text(tmp_path)) == json.loads(original)
+    assert client.post('/api/printer/select', json={'printer_id': 2}, headers=h).json()['card'] == 'blank'
+    back = client.post('/api/printer/select', json={'printer_id': 1}, headers=h).json()
+    assert back['card'] == 'restored'
+    assert json.loads(config_text(tmp_path)) == json.loads(original[0])
+    assert (card_text(tmp_path), notes_text(tmp_path)) == original[1:]
+
+
+def test_each_printer_keeps_its_own_card_across_several_switches(client, tmp_path):
+    h = write_headers(client)
+    client.post('/api/printer/select', json={'printer_id': 2}, headers=h)
+    # the user fills in the X1C card
+    path = tmp_path / 'Library/Devices/X2D/device.json'
+    card = json.loads(card_text(tmp_path)); card['user_confirmed'] = {'model': 'X1C', 'ams_count': 1}
+    core.write_json(path, card)
+    x1c_card = card_text(tmp_path)
+    h2c = (tmp_path / 'Library/Devices/printer-1/device.json').read_text(encoding='utf-8')
+    client.post('/api/printer/select', json={'printer_id': 1}, headers=h)
+    assert card_text(tmp_path) == h2c
+    again = client.post('/api/printer/select', json={'printer_id': 2}, headers=h).json()
+    assert again['card'] == 'restored' and card_text(tmp_path) == x1c_card
+
+
+def test_a_switch_that_fails_midway_leaves_everything_as_it_was(client, tmp_path, monkeypatch):
+    before = (config_text(tmp_path), card_text(tmp_path), notes_text(tmp_path))
+    def boom(*a, **k):
+        raise core.WorkflowError('disk full')
+    monkeypatch.setattr(printer_api.workspace, 'configure_connection', boom)
+    assert client.post('/api/printer/select', json={'printer_id': 2}, headers=write_headers(client)).status_code == 409
+    assert (config_text(tmp_path), card_text(tmp_path), notes_text(tmp_path)) == before
+    assert not (tmp_path / 'Library/Devices/printer-1').exists() or (tmp_path / 'Library/Devices/printer-1/device.json').read_text(encoding='utf-8') == before[1]
+
+
+def test_a_failure_while_writing_the_new_card_rolls_the_config_back(client, tmp_path, monkeypatch):
+    before = (config_text(tmp_path), card_text(tmp_path), notes_text(tmp_path))
+    real = core.write_json
+    def flaky(path, value):
+        if str(path).replace('\\', '/').endswith('Library/Devices/X2D/device.json'):
+            raise OSError('simulated write failure')
+        return real(path, value)
+    monkeypatch.setattr(printer_api.core, 'write_json', flaky)
+    assert client.post('/api/printer/select', json={'printer_id': 2}, headers=write_headers(client)).status_code in {409, 500}
+    assert (config_text(tmp_path), card_text(tmp_path), notes_text(tmp_path)) == before
+
+
+def test_a_card_without_a_notes_file_is_switched_and_restored_without_inventing_one(client, tmp_path):
+    (tmp_path / 'Library/Devices/X2D/installed.md').unlink()
+    h = write_headers(client)
+    original = card_text(tmp_path)
+    client.post('/api/printer/select', json={'printer_id': 2}, headers=h)
+    client.post('/api/printer/select', json={'printer_id': 1}, headers=h)
+    assert card_text(tmp_path) == original and not (tmp_path / 'Library/Devices/X2D/installed.md').exists()
+
+
+def test_the_page_is_told_what_happened_to_the_card(client):
+    data = client.post('/api/printer/select', json={'printer_id': 2}, headers=write_headers(client)).json()
+    assert '空白' in data['message'] and '原样保存' in data['message'] and '没有填写' in data['message']
+    back = client.post('/api/printer/select', json={'printer_id': 1}, headers=write_headers(client)).json()
+    assert '还原' in back['message']
 
 
 def test_selecting_the_current_printer_is_a_no_op(client, tmp_path):
@@ -159,3 +230,12 @@ def test_only_the_documented_methods_are_accepted(client, tmp_path):
     assert client.post('/api/printers', headers=h).status_code == 405
     assert client.get('/api/printer/select').status_code in {404, 405}  # PrintLab's catch-all route answers 404 for unknown GETs under /api
     assert config_text(tmp_path) == before
+
+
+def test_the_list_says_which_printers_already_have_a_card(client, tmp_path):
+    first = {p['id']: p['has_card'] for p in client.get('/api/printers').json()['printers']}
+    assert first == {1: True, 2: False}  # the selected one has the live card; the other has none yet
+    h = write_headers(client)
+    client.post('/api/printer/select', json={'printer_id': 2}, headers=h)
+    after = {p['id']: p['has_card'] for p in client.get('/api/printers').json()['printers']}
+    assert after == {1: True, 2: True}  # the H2C card is now stored, the X1C has the live blank one

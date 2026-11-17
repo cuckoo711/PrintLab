@@ -18,10 +18,14 @@ export default function PrinterPicker({onSwitched}){
   const id=Number(event.target.value);
   const target=printers.find(p=>p.id===id);
   if(!target||target.selected||busy||!topLevel)return;
-  const mismatch=target.matches_device_card===false;
-  const text=`把工作台切换到「${target.name}」（${target.model}）？\n\n`+
-   (mismatch?`设备卡目前记录的是 ${data.device_card_model||'另一台设备'}，里面的供料与喷嘴信息不适用于 ${target.model}，页面上与之相关的内容可能不准确，需要你之后重新核对。\n\n`:'')+
-   '已有的切片与批准会失效，需要为这台设备重新生成。这一步只改“当前设备”，不会发送或批准任何打印。';
+  const text=`把工作台切换到「${target.name}」（${target.model}）？
+
+`+
+   `设备卡也会一起换：现在这台的设备卡会原样保存，之后切回来会原样还原。`+
+   `${target.has_card?`「${target.name}」之前保存过设备卡，会还原它。`:`「${target.name}」还没有设备卡，会建一张空白的，只记录名称和机型，供料、喷嘴等不会替你填。`}
+
+`+
+   '已有的切片与批准会失效，需要为这台设备重新生成。这一步不会发送或批准任何打印。';
   event.target.value=String(selected?.id??'');
   if(!window.confirm(text))return;
   setBusy(true);setError('');setNotice('');
