@@ -1,7 +1,7 @@
 import React,{useState,useEffect,useRef,lazy,Suspense} from 'react';
 import {createRoot} from 'react-dom/client';
 import ReactMarkdown from 'react-markdown';
-import {ArrowUpRight,ArrowRight,ArrowLeft,Plus,Grid2X2,LayoutDashboard,BookOpen,Printer,Sun,Moon,Search,Box,Check,ChevronRight,Download,FileText,X,Clock3,Layers3,RefreshCw,ExternalLink,WifiOff,Circle,Copy,Settings2,CheckCircle2,AlertCircle,FolderOpen,Menu,Package,Lightbulb,ShoppingBag,BookmarkCheck} from 'lucide-react';
+import {ArrowUpRight,ArrowRight,ArrowLeft,Plus,Grid2X2,LayoutDashboard,BookOpen,Printer,Sun,Moon,Search,Box,ChevronRight,Download,FileText,X,Clock3,Layers3,RefreshCw,ExternalLink,WifiOff,Circle,Settings2,CheckCircle2,AlertCircle,FolderOpen,Menu,Package,Lightbulb,ShoppingBag,BookmarkCheck} from 'lucide-react';
 const ModelViewer=lazy(()=>import('./ModelViewer'));
 import './styles.css';
 import Shop from './Shop';
@@ -39,10 +39,12 @@ function Modal({title,onClose,children,wide=false}){
  return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><section className={`modal ${wide?'modal-wide':''}`} role="dialog" aria-modal="true" aria-label={title} ref={ref}><div className="modal-heading"><h2>{title}</h2><button className="icon-button" aria-label="关闭" onClick={onClose}><X size={20}/></button></div>{children}</section></div>
 }
 function IdeaModal({onClose}){
- const [name,setName]=useState(''),[purpose,setPurpose]=useState(''),[note,setNote]=useState(''),[copied,setCopied]=useState(false),[fallback,setFallback]=useState(false);
- const prompt=`在 PrintLab 新建一个项目：${name||'未命名作品'}。\n用途：${purpose||'请和我一起明确'}\n尺寸、材料或参考：${note||'待讨论'}\n请先加载当前 PrintLab 工作空间的 AGENTS.md 和已有项目，核对是否已有对应作品。新作品使用 printlab new 创建，记录项目 ID、需求和 Review/team.md 分工，再按已确认阶段推进外形、建模与预览。收尾用 printlab handoff 保存交接。打印按具体任务确认。`;
- async function copy(){try{await navigator.clipboard.writeText(prompt);setCopied(true)}catch{setFallback(true)}}
- return <Modal title="让一个想法开始" onClose={onClose}><p className="modal-intro">简单写下想做的物品，复制到我们的对话。Agent 会接着整理需求并创建项目。</p><label className="field">想做什么<input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="例如：桌边耳机挂钩"/></label><label className="field">它要解决什么问题<textarea value={purpose} onChange={e=>setPurpose(e.target.value)} placeholder="怎么使用，放在哪里，需要承受什么……" rows={3}/></label><label className="field">已知尺寸或参考<textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="可以稍后在对话中补照片和尺寸" rows={2}/></label>{fallback&&<label className="field">复制下面的内容到对话<textarea readOnly value={prompt} rows={7} onFocus={e=>e.target.select()}/></label>}<button className="button primary full" disabled={!name.trim()} onClick={copy}>{copied?<Check size={18}/>:<Copy size={18}/>} {copied?'已复制，回到对话粘贴':'复制需求到对话'}</button><p className="fine-print">这里只整理需求，不会直接创建打印任务。</p></Modal>
+ const [name,setName]=useState(''),[purpose,setPurpose]=useState(''),[note,setNote]=useState('');
+ // The draft goes to the companion assistant in the address fragment (never sent to a server). It is only filled into the message box there.
+ const draft=`我想做一个新作品：${name||'未命名作品'}。\n它要解决的问题：${purpose||'请和我一起明确'}\n已知尺寸或参考：${note||'待讨论'}\n请先查一下有没有已有的对应作品，再帮我整理需求、列出还不知道的尺寸和材料。需要建项目时，把要运行的 printlab new 命令写给我，由我自己运行。`;
+ const href=`${location.protocol}//${location.hostname}:8019/chat#draft=${encodeURIComponent(draft)}`;
+ const ready=!!name.trim();
+ return <Modal title="让一个想法开始" onClose={onClose}><p className="modal-intro">简单写下想做的物品，会带到 AI 助手那边继续整理需求。</p><label className="field">想做什么<input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="例如：桌边耳机挂钩"/></label><label className="field">它要解决什么问题<textarea value={purpose} onChange={e=>setPurpose(e.target.value)} placeholder="怎么使用，放在哪里，需要承受什么……" rows={3}/></label><label className="field">已知尺寸或参考<textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="可以稍后在对话中补照片和尺寸" rows={2}/></label>{ready?<a className="button primary full" href={href} target="_blank" rel="noreferrer" onClick={onClose}><ArrowUpRight size={18}/> 在 AI 助手里继续</a>:<button type="button" className="button primary full" disabled><ArrowUpRight size={18}/> 在 AI 助手里继续</button>}<p className="fine-print">这里只整理需求，不会创建项目，也不会创建打印任务。内容会带到助手的输入框，由你确认后再发送。</p></Modal>
 }
 function DocumentModal({document:doc,onClose}){
  const [text,setText]=useState(null),[error,setError]=useState('');useEffect(()=>{const controller=new AbortController();fetch(doc.url,{signal:controller.signal}).then(r=>{if(!r.ok)throw Error(`无法读取资料（${r.status}）`);return r.text()}).then(setText).catch(e=>{if(e.name!=='AbortError')setError(e.message)});return()=>controller.abort()},[doc.url]);
