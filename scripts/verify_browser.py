@@ -95,7 +95,8 @@ def main():
                 page.goto(base + '/#/onboarding')
                 page.get_by_role('heading', name='Sarah · 3D 打印顾问', exact=True).wait_for()
                 page.get_by_role('heading', name='Mike · 工作流设计师', exact=True).wait_for()
-                assert page.get_by_role('button', name='让 Agent 接着配置').count() == 1
+                # The "let the agent continue setup" button was removed on purpose (this workspace has its own agent).
+                assert page.get_by_role('button', name='让 Agent 接着配置').count() == 0
                 page.get_by_role('button', name='Context/profile.md', exact=True).click()
                 page.get_by_role('dialog').wait_for()
                 assert '加载失败' not in page.get_by_role('dialog').inner_text()

@@ -1,5 +1,5 @@
 import React, {useEffect, useState} from 'react';
-import {Check, Copy, ArrowRight} from 'lucide-react';
+import {ArrowRight} from 'lucide-react';
 import './onboarding.css';
 
 const roleStates = {
@@ -12,8 +12,6 @@ const roleStates = {
 export default function Onboarding({onNavigate, onDocument}) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
-  const [copyText, setCopyText] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -35,16 +33,6 @@ export default function Onboarding({onNavigate, onDocument}) {
     };
   }, []);
 
-  async function copySetup() {
-    const text = `请继续配置我的 PrintLab，工作空间为 ${data.workspace}。先读取 AGENTS.md、docs/ONBOARDING.md 和 printlab onboarding status，接续已完成的步骤。核对已有角色聊天后，自动建立尚缺的 Mike 和 Sarah 两个独立聊天，让它们读取同一工作空间并分别介绍自己。读取设备和已装材料，再帮我登记其他耗材，按我的设备与使用目标引导第一件作品。`;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      setCopyText(text);
-    }
-  }
-
   function openDocument(row) {
     onDocument({title: row.name, path: row.path, url: '/api/documents/' + row.path});
   }
@@ -52,10 +40,6 @@ export default function Onboarding({onNavigate, onDocument}) {
   return <div className="onboarding-page">
     <header className="page-heading">
       <div><h1>配置与队伍</h1><p>共同设备、使用习惯和项目进度，供每个会话接续。</p></div>
-      {data && <button className="button primary" onClick={copySetup}>
-        {copied ? <Check size={17}/> : <Copy size={17}/>}
-        {copied ? '已复制，粘贴到配置会话' : '让 Agent 接着配置'}
-      </button>}
     </header>
     {error && <div role="alert" className="inline-error">{error}。{data ? '保留上次读取的资料。' : '请刷新重试。'}</div>}
     {!data && !error && <p className="muted">正在读取共同配置…</p>}
@@ -93,6 +77,5 @@ export default function Onboarding({onNavigate, onDocument}) {
         <p className="muted onboarding-path">{data.workspace}</p>
       </section>
     </>}
-    {copyText && <label className="field">复制到配置会话<textarea readOnly value={copyText} rows={6} onFocus={event => event.target.select()}/></label>}
   </div>;
 }
