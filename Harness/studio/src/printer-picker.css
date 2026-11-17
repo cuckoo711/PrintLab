@@ -1,0 +1,7 @@
+.printer-picker { display: flex; flex-direction: column; gap: 6px; margin: 16px 0 0; }
+.printer-picker label { font-size: 11px; letter-spacing: .08em; color: var(--muted); }
+.printer-picker select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 14px; }
+.printer-picker select:disabled { opacity: .6; cursor: not-allowed; }
+.printer-picker-note, .printer-picker-warn, .printer-picker-error { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.printer-picker-warn { color: #a5753c; }
+.printer-picker-error { color: #b3261e; }

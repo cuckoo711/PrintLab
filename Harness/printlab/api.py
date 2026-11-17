@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__, bambuddy, core, shop, history
 from .prepared_api import router as prepared_router
+from .printer_api import router as printer_router
 
 @asynccontextmanager
 async def lifespan(app):
@@ -157,6 +158,7 @@ def document(relative: str):
 
 
 app.include_router(prepared_router)
+app.include_router(printer_router)
 
 # Mount last so a SPA route cannot shadow an API endpoint.
 dist = core.ROOT / "Harness/studio/dist"
